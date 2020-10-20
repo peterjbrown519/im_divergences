@@ -8,12 +8,18 @@ Notes:
 
 # We begin with some helper functions
 
-def h(x):
-	# Shannon entropy
-	if 0 < x < 1:
-		return -x*log2(x) - (1-x)*log2(1-x)
-	else:
-		return 0.0
+def cond_ent(joint, marg):
+	hab, hb = 0.0, 0.0
+
+	for prob in joint:
+		if 0.0 < prob < 1.0:
+			hab += -prob*log2(prob)
+
+	for prob in marg:
+		if 0.0 < prob < 1.0:
+			hb += -prob*log2(prob)
+
+	return hab - hb
 
 def score_constraints(sys, Aops, Bops, eta=1.0):
 	"""
@@ -92,30 +98,49 @@ def HAgB(sys, eta):
 	A_meas = [[a00, a01], [a10, a11]]
 	B_meas = [[b00, b01], [b10, b11], [b20,b21]]
 
-	p00 = eta**2 * (rho*qtp.tensor(A_meas[0][0], B_meas[2][0])).tr().real + \
-				+ eta*(1-eta)*((rho*qtp.tensor(A_meas[0][0], id)).tr().real + (rho*qtp.tensor(id, B_meas[2][0])).tr().real) + \
-				+ (1-eta)*(1-eta)
-	p01 = eta**2 * (rho*qtp.tensor(A_meas[0][0], B_meas[2][1])).tr().real + \
-				+ eta * (1-eta) * (rho*qtp.tensor(id, B_meas[2][1])).tr().real
-	p10 = eta**2 * (rho*qtp.tensor(A_meas[0][1], B_meas[2][0])).tr().real + \
-				+ eta * (1-eta) * (rho*qtp.tensor(A_meas[0][1], id)).tr().real
-	p11 = eta**2 * (rho*qtp.tensor(A_meas[0][1], B_meas[2][1])).tr().real
+	# Complete no bin distribution
+	q00 = eta**2 * (rho*qtp.tensor(A_meas[0][0], B_meas[2][0])).tr().real
+	q01 = eta**2 * (rho*qtp.tensor(A_meas[0][0], B_meas[2][1])).tr().real
+	q02 = eta * (1-eta) * (rho*qtp.tensor(A_meas[0][0], id)).tr().real
+	q10 = eta**2 * (rho*qtp.tensor(A_meas[0][1], B_meas[2][0])).tr().real
+	q11 = eta**2 * (rho*qtp.tensor(A_meas[0][1], B_meas[2][1])).tr().real
+	q12 = eta * (1-eta) * (rho*qtp.tensor(A_meas[0][1], id)).tr().real
+	q20 = eta * (1-eta) * (rho*qtp.tensor(id, B_meas[2][0])).tr().real
+	q21 = eta * (1-eta) * (rho*qtp.tensor(id, B_meas[2][1])).tr().real
+	q22 = (1-eta)**2
+
+	# qjoint = [q00,q01,q02,q10,q11,q12,q20,q21,q22]
+	# qmarg = [q00 + q10 + q20, q01 + q11 + q21, q02, + q12 + q22]
+
+	# Alice bins into 0
+	p00 = q00 + q20
+	p01 = q01 + q21
+	p02 = q02 + q22
+	p10 = q10
+	p11 = q11
+	p12 = q12
+	pjoint = [p00,p01,p02,p10,p11,p12]
 
 	pb0 = p00 + p10
 	pb1 = p01 + p11
-	Hab = 0.0
-	if 0 < p00 < 1:
-		Hab += -p00*log2(p00)
-	if 0 < p01 < 1:
-		Hab += -p01*log2(p01)
-	if 0 < p10 < 1:
-		Hab += -p10*log2(p10)
-	if 0 < p11 < 1:
-		Hab += -p11*log2(p11)
+	pb2 = p02 + p12
 
-	Hb = h(pb0)
+	pmarg = [pb0, pb1, pb2]
 
-	return Hab - Hb
+	# Alice and bob both bin
+	r00 = q00 + q20 + q02 + q22
+	r01 = q01 + q21
+	r10 = q10 + q12
+	r11 = q11
+	rjoint = [r00, r01, r10, r11]
+	rb0 = r00 + r10
+	rb1 = r01 + r11
+	rmarg = [rb0, rb1]
+
+	hagb_abin = cond_ent(pjoint,pmarg)
+	hagb_bothbin = cond_ent(rjoint, rmarg)
+
+	return min([hagb_bothbin, hagb_abin])
 
 def rate(SDP,sys,eta):
 	return -4*log2(-SDP.dual) - HAgB(sys,eta)
